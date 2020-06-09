@@ -197,24 +197,3 @@ func (d GcsDownloader) Download(url string) (io.ReadCloser, error) {
 	return SelfCleaningDownload{file: archive}, nil
 }
 
-func shaForURL(url string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(url)))
-}
-
-func incrementDownloadResponseCodeCounter(code int) {
-	var value string
-	switch {
-	case code >= 200 && code < 300:
-		value = "2xx"
-	case code >= 300 && code < 400:
-		value = "3xx"
-	case code >= 400 && code < 500:
-		value = "4xx"
-	case code >= 400 && code < 600:
-		value = "5xx"
-	default:
-		logrus.WithField("code", code).Error("unmeasurable download response code")
-		return
-	}
-	downloadResponseCodeCounter.WithLabelValues(value).Inc()
-}
