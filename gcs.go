@@ -8,13 +8,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
 
 func main() {
 	downloader := GcsDownloader{tmpPath: os.TempDir()}
-	downloader.Download("")
+	downloader.Download("gs://pow-play-cms/g5-clw-1k22xhiz1c-esteban/g5-clw-1k22xhiz1c-esteban-fb887d6647879a11bad83757db35516c.tar.gz")
 }
 
 const (
@@ -97,29 +98,35 @@ func IsGeneralDownloadError(err error) bool {
 }
 
 type GcsInfo struct {
-	uri string
+	uri              string
+	bucketName       string
+	objectName       string
+	archivedFileName string
 }
 
-func (info GcsInfo) GcsBucketName() string {
-	return "pow-play-cms"
+func NewGcsInfo(uri string) *GcsInfo {
+	bucketNameRe := regexp.MustCompile(`^gs://([^/]+)`)
+	bucketNameMatch := bucketNameRe.FindSubmatch([]byte(uri))
+	bucketName := string(bucketNameMatch[1])
+
+	objectNameReString := "^gs://" + bucketName + "/(.+)"
+	objectNameRe := regexp.MustCompile(objectNameReString)
+	objectNameMatch := objectNameRe.FindSubmatch([]byte(uri))
+	objectName := string(objectNameMatch[1])
+
+	splits := strings.Split(objectName, "/")
+	archivedFileName := splits[len(splits)-1]
+	return &GcsInfo{uri: uri, bucketName: bucketName, objectName: objectName, archivedFileName: archivedFileName}
 }
 
-func (info GcsInfo) GcsObjectName() string {
-	return "g5-clw-1k22wieece-el-dorado/g5-clw-1k22wieece-el-dorado-01b1ffa18c97fcc815490ad12303891e.tar.gz"
-}
-
-func (info GcsInfo) GcsArchivedFileName() string {
-	return "g5-clw-1k22wieece-el-dorado-01b1ffa18c97fcc815490ad12303891e.tar.gz"
-}
-
-func NewGcsReader(gcsInfo GcsInfo) (*storage.Reader, error) {
+func NewGcsReader(gcsInfo *GcsInfo) (*storage.Reader, error) {
 	ctx := context.Background()
 	client, err := storage.NewClient(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	bkt := client.Bucket(gcsInfo.GcsBucketName())
+	bkt := client.Bucket(gcsInfo.bucketName)
 	attrs, err := bkt.Attrs(ctx)
 	if err != nil {
 		return nil, err
@@ -127,7 +134,7 @@ func NewGcsReader(gcsInfo GcsInfo) (*storage.Reader, error) {
 	fmt.Printf("bucket %s, created at %s, is located in %s with storage class %s\n",
 		attrs.Name, attrs.Created, attrs.Location, attrs.StorageClass)
 
-	obj := bkt.Object(gcsInfo.GcsObjectName())
+	obj := bkt.Object(gcsInfo.objectName)
 	objAttrs, err := obj.Attrs(ctx)
 	if err != nil {
 		return nil, err
@@ -151,7 +158,7 @@ func (d GcsDownloader) Download(url string) (io.ReadCloser, error) {
 	//timer := prometheus.NewTimer(processingStepSummaries.WithLabelValues("downloader"))
 	//defer timer.ObserveDuration()
 
-	gcsInfo := GcsInfo{url}
+	gcsInfo := NewGcsInfo(url)
 	reader, err := NewGcsReader(gcsInfo)
 	if err != nil {
 		return nil, err
@@ -165,7 +172,7 @@ func (d GcsDownloader) Download(url string) (io.ReadCloser, error) {
 		//maybeLogrus("closing archive reader", reader.Close())
 	}()
 
-	tmpFilePath := filepath.Join(d.tmpPath, gcsInfo.GcsArchivedFileName())
+	tmpFilePath := filepath.Join(d.tmpPath, gcsInfo.archivedFileName)
 	fmt.Println(tmpFilePath)
 	// You could read the content of the file into memory, but then memory usage
 	// of this service gets pretty unpredictable. This is a tradeoff of speed for
@@ -198,5 +205,3 @@ func (d GcsDownloader) Download(url string) (io.ReadCloser, error) {
 
 	return SelfCleaningDownload{file: archive}, nil
 }
-
-
